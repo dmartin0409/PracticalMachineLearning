@@ -1,0 +1,103 @@
+---
+title: "Practical Machine Learning"
+author: "David Martin"
+date: "July 22, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Overview
+
+The project will use machine learning techniques to determine the type of physical exercise being performed based on measurements from wearable fitness trackers.  The data for this project comes from http://groupware.les.inf.puc-rio.br/har and collects movements from the subject's arm, forearm, waist, and the dumbbell being used in the weight lifting exercies.  Five different exercises are performed, labeled A through E.
+
+A training data set of 19,622 observations and 52 measurements for each is given.  Random forest from the R caret library will be performed on the training data and used to predict the exercise of 20 observations in the testing data set.
+
+## Load training data
+
+First we will load the libraries and training data set.
+
+```{r}
+training <- read.csv("pml-training.csv", stringsAsFactors = FALSE)
+```
+
+Next we need to find the columns of data that relate to the measurements of accelerometers.  These will be of type numeric or integer and do not contain any `NA` values.
+
+```{r}
+training.subset <- c()
+for (i in 8:159) {
+  if(sum(is.na(training[,i]))==0) {
+    if(class(training[,i]) == "numeric" | class(training[,i])=="integer") {
+       training.subset <- append(training.subset,i)
+    }
+  }
+}
+```
+
+We will use this subset above to produce the formula to be used in the `train` function.
+
+```{r}
+training.formula <- as.formula(paste("classe ~ ",
+                                     paste(names(training[,training.subset]),
+                                           collapse = "+")))
+training.formula
+```
+
+## Random Forest model
+
+Since the response variable, `classe` for exercise class, is categorical and all the predictors are numerical, we can use several different machine learning methods such as `glm`, but for this project we will use `rf`, from the randomForest library since this accuracy is important.  Experiments show both of these models produce the same results in about the same amount of time.
+
+### Cross Validation 
+
+First, we will split the training data into a training *sample* and testing *sample* to see how well the random forest model performs.
+
+Based on experience with this data, it is determined that the number of random forest trees to build in the model does not need to be more than 100 since the error rate levels off (see below).  Plus it also takes about 20 minutes to compute 100 trees, so the additional accuracy for the default 500 tress is not worth the CPU time.
+
+The following code will split the training set into two, build a `rf` model with 100 trees, and lastly predict and compare the results with actual values.
+
+```{r, cache=TRUE}
+library(caret, quietly = TRUE)
+library(randomForest, warn.conflicts = FALSE)
+
+set.seed(54321)
+CV.set <- createDataPartition(training$X, p=0.7, list=FALSE)
+training.sample <- training[CV.set,]
+testing.sample <- training[-CV.set,]
+
+modFitCV <- train(training.formula, data=training.sample, model="rf", ntree=100)
+modFitCV$finalModel
+predCV <- predict(modFitCV, testing.sample)
+sum(predCV == testing.sample$classe) / dim(testing.sample)[1]
+```
+
+The last function in this block is to divide the number of matches for the predicted `classes` variable by the total number of testing samples.  Since this result is 1, meaning **100%** predicted matches, we know we have a good model.
+
+### Final Model
+
+Now we can use the same function to build a `rf` model against the entire training set.
+
+```{r, cache=TRUE}
+set.seed(47529)
+modFitFull <- train(training.formula, data=training, model="rf", ntree=100)
+modFitFull$finalModel
+```
+
+From this model, we can see the error rate is **0.6%**, and the confusion matrix shows a strong diagonal matching of data.  Let's look at how the error rate drops as the number of trees increases.
+
+```{r}
+plot(modFitFull$finalModel, main="Random Forest error rate")
+```
+
+## Prediction
+
+Lastly, we will use the `predict` function for this model against the testing data set.
+
+```{r}
+testing <- read.csv("pml-testing.csv", stringsAsFactors = FALSE)
+pred20 <- predict(modFitFull, testing)
+pred20
+```
+
+
